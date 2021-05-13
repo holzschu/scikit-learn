@@ -73,7 +73,8 @@ if SETUPTOOLS_COMMANDS.intersection(sys.argv):
         },
     )
 else:
-    extra_setuptools_args = dict()
+    # Changes for iOS/OSX : we need a directory install, not a zip-file install
+    extra_setuptools_args = dict(zip_safe=False)
 
 
 # Custom clean command to remove build artifacts

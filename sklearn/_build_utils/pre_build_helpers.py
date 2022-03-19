@@ -49,6 +49,9 @@ def compile_test_program(code, extra_preargs=[], extra_postargs=[]):
         extra_preargs = extra_preargs(ccompiler)
     if callable(extra_postargs):
         extra_postargs = extra_postargs(ccompiler)
+    # OSX 12.3=
+    if (sys.platform == 'darwin') and (os.getenv('PLATFORM') == 'macosx'):
+        extra_postargs += ["-isysroot", "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk"]
 
     start_dir = os.path.abspath('.')
 

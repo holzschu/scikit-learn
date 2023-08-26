@@ -8,11 +8,32 @@ parameters:
     default: "none"
 
 jobs:
+  lint:
+    docker:
+      - image: cimg/python:3.8.12
+    steps:
+      - checkout
+      - run:
+          name: dependencies
+          command: |
+            source build_tools/shared.sh
+            # Include pytest compatibility with mypy
+            pip install pytest flake8 $(get_dep mypy min) $(get_dep black min)
+      - run:
+          name: linting
+          command: ./build_tools/linting.sh
+
   doc-min-dependencies:
     docker:
       - image: cimg/python:3.8.12
     environment:
-      - GITHUB_ARTIFACT_URL: << pipeline.parameters.GITHUB_RUN_URL >>/doc-min-dependencies.zip
+      - MKL_NUM_THREADS: 2
+      - OPENBLAS_NUM_THREADS: 2
+      - CONDA_ENV_NAME: testenv
+      - LOCK_FILE: build_tools/circle/doc_min_dependencies_linux-64_conda.lock
+      # Sphinx race condition in doc-min-dependencies is causing job to stall
+      # Here we run the job serially
+      - SPHINX_NUMJOBS: 1
     steps:
       - checkout
       - run: bash build_tools/circle/download_documentation.sh
@@ -24,7 +45,10 @@ jobs:
     docker:
       - image: cimg/python:3.8.12
     environment:
-      - GITHUB_ARTIFACT_URL: << pipeline.parameters.GITHUB_RUN_URL >>/doc.zip
+      - MKL_NUM_THREADS: 2
+      - OPENBLAS_NUM_THREADS: 2
+      - CONDA_ENV_NAME: testenv
+      - LOCK_FILE: build_tools/circle/doc_linux-64_conda.lock
     steps:
       - checkout
       - run: bash build_tools/circle/download_documentation.sh
@@ -37,27 +61,6 @@ jobs:
           root: doc/_build/html
           paths: .
 
-  linux-arm64:
-    machine:
-      image: ubuntu-2004:202101-01
-    resource_class: arm.medium
-    environment:
-      - OMP_NUM_THREADS: 2
-      - OPENBLAS_NUM_THREADS: 2
-      - CONDA_ENV_NAME: testenv
-      - LOCK_FILE: build_tools/circle/py39_conda_forge_linux-aarch64_conda.lock
-    steps:
-      - checkout
-      - run: ./build_tools/circle/checkout_merge_commit.sh
-      - restore_cache:
-          key: linux-arm64-{{ .Branch }}
-      - run: ./build_tools/circle/build_test_arm.sh
-      - save_cache:
-          key: linux-arm64-{{ .Branch }}
-          paths:
-            - ~/.cache/ccache
-            - ~/.cache/pip
-            - ~/scikit_learn_data
   deploy:
     docker:
       - image: cimg/python:3.8.12
@@ -89,11 +92,3 @@ workflows:
       - deploy:
           requires:
             - doc
-
-  linux-arm64:
-    when:
-      equal: [ "none", << pipeline.parameters.GITHUB_RUN_URL >> ]
-    # Prevent double execution of this job: on push
-    # by default and when triggered by the workflow
-    jobs:
-      - linux-arm64

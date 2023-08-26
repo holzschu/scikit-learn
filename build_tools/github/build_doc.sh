@@ -16,9 +16,18 @@ set -e
 # If the inspection of the current commit fails for any reason, the default
 # behavior is to quick build the documentation.
 
+<<<<<<< HEAD:build_tools/github/build_doc.sh
 if [ -n "$GITHUB_ACTION" ]
 then
     # Map the variables for the new documentation builder to the old one
+=======
+# defines the get_dep and show_installed_libraries functions
+source build_tools/shared.sh
+
+if [ -n "$GITHUB_ACTION" ]
+then
+    # Map the variables from Github Action to CircleCI
+>>>>>>> 4b0de115f9b4fad0006553d64b4b49981e7f52da:build_tools/circle/build_doc.sh
     CIRCLE_SHA1=$(git log -1 --pretty=format:%H)
 
     CIRCLE_JOB=$GITHUB_JOB
@@ -169,11 +178,20 @@ ccache -M 512M
 export CCACHE_COMPRESS=1
 
 # pin conda-lock to latest released version (needs manual update from time to time)
+<<<<<<< HEAD:build_tools/github/build_doc.sh
 mamba install conda-lock==1.0.5 -y
 conda-lock install --log-level WARNING --name $CONDA_ENV_NAME $LOCK_FILE
 source activate $CONDA_ENV_NAME
 
 mamba list
+=======
+mamba install "$(get_dep conda-lock min)" -y
+
+conda-lock install --log-level WARNING --name $CONDA_ENV_NAME $LOCK_FILE
+source activate $CONDA_ENV_NAME
+
+show_installed_libraries
+>>>>>>> 4b0de115f9b4fad0006553d64b4b49981e7f52da:build_tools/circle/build_doc.sh
 
 # Set parallelism to 3 to overlap IO bound tasks with CPU bound tasks on CI
 # workers with 2 cores when building the compiled extensions of scikit-learn.
@@ -185,11 +203,17 @@ ccache -s
 
 export OMP_NUM_THREADS=1
 
+# Avoid CI job getting killed because it uses too much memory
+if [[ -z $SPHINX_NUMJOBS ]]; then
+    export SPHINX_NUMJOBS=2
+fi
+
 if [[ "$CIRCLE_BRANCH" =~ ^main$ && -z "$CI_PULL_REQUEST" ]]
 then
     # List available documentation versions if on main
     python build_tools/circle/list_versions.py > doc/versions.rst
 fi
+
 
 # The pipefail is requested to propagate exit code
 set -o pipefail && cd doc && make $make_args 2>&1 | tee ~/log.txt

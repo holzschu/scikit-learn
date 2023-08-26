@@ -136,8 +136,9 @@ def test_grid_from_X():
     # the unique values instead of the percentiles)
     percentiles = (0.05, 0.95)
     grid_resolution = 100
+    is_categorical = [False, False]
     X = np.asarray([[1, 2], [3, 4]])
-    grid, axes = _grid_from_X(X, percentiles, grid_resolution)
+    grid, axes = _grid_from_X(X, percentiles, is_categorical, grid_resolution)
     assert_array_equal(grid, [[1, 2], [1, 4], [3, 2], [3, 4]])
     assert_array_equal(axes, X.T)
 
@@ -148,7 +149,9 @@ def test_grid_from_X():
 
     # n_unique_values > grid_resolution
     X = rng.normal(size=(20, 2))
-    grid, axes = _grid_from_X(X, percentiles, grid_resolution=grid_resolution)
+    grid, axes = _grid_from_X(
+        X, percentiles, is_categorical, grid_resolution=grid_resolution
+    )
     assert grid.shape == (grid_resolution * grid_resolution, X.shape[1])
     assert np.asarray(axes).shape == (2, grid_resolution)
 
@@ -156,11 +159,64 @@ def test_grid_from_X():
     n_unique_values = 12
     X[n_unique_values - 1 :, 0] = 12345
     rng.shuffle(X)  # just to make sure the order is irrelevant
-    grid, axes = _grid_from_X(X, percentiles, grid_resolution=grid_resolution)
+    grid, axes = _grid_from_X(
+        X, percentiles, is_categorical, grid_resolution=grid_resolution
+    )
     assert grid.shape == (n_unique_values * grid_resolution, X.shape[1])
     # axes is a list of arrays of different shapes
     assert axes[0].shape == (n_unique_values,)
     assert axes[1].shape == (grid_resolution,)
+
+
+@pytest.mark.parametrize(
+    "grid_resolution",
+    [
+        2,  # since n_categories > 2, we should not use quantiles resampling
+        100,
+    ],
+)
+def test_grid_from_X_with_categorical(grid_resolution):
+    """Check that `_grid_from_X` always sample from categories and does not
+    depend from the percentiles.
+    """
+    pd = pytest.importorskip("pandas")
+    percentiles = (0.05, 0.95)
+    is_categorical = [True]
+    X = pd.DataFrame({"cat_feature": ["A", "B", "C", "A", "B", "D", "E"]})
+    grid, axes = _grid_from_X(
+        X, percentiles, is_categorical, grid_resolution=grid_resolution
+    )
+    assert grid.shape == (5, X.shape[1])
+    assert axes[0].shape == (5,)
+
+
+@pytest.mark.parametrize("grid_resolution", [3, 100])
+def test_grid_from_X_heterogeneous_type(grid_resolution):
+    """Check that `_grid_from_X` always sample from categories and does not
+    depend from the percentiles.
+    """
+    pd = pytest.importorskip("pandas")
+    percentiles = (0.05, 0.95)
+    is_categorical = [True, False]
+    X = pd.DataFrame(
+        {
+            "cat": ["A", "B", "C", "A", "B", "D", "E", "A", "B", "D"],
+            "num": [1, 1, 1, 2, 5, 6, 6, 6, 6, 8],
+        }
+    )
+    nunique = X.nunique()
+
+    grid, axes = _grid_from_X(
+        X, percentiles, is_categorical, grid_resolution=grid_resolution
+    )
+    if grid_resolution == 3:
+        assert grid.shape == (15, 2)
+        assert axes[0].shape[0] == nunique["num"]
+        assert axes[1].shape[0] == grid_resolution
+    else:
+        assert grid.shape == (25, 2)
+        assert axes[0].shape[0] == nunique["cat"]
+        assert axes[1].shape[0] == nunique["cat"]
 
 
 @pytest.mark.parametrize(
@@ -177,8 +233,9 @@ def test_grid_from_X():
 )
 def test_grid_from_X_error(grid_resolution, percentiles, err_msg):
     X = np.asarray([[1, 2], [3, 4]])
+    is_categorical = [False]
     with pytest.raises(ValueError, match=err_msg):
-        _grid_from_X(X, grid_resolution=grid_resolution, percentiles=percentiles)
+        _grid_from_X(X, percentiles, is_categorical, grid_resolution)
 
 
 @pytest.mark.parametrize("target_feature", range(5))
@@ -427,7 +484,7 @@ class NoPredictProbaNoDecisionFunction(ClassifierMixin, BaseEstimator):
     "estimator, params, err_msg",
     [
         (
-            KMeans(),
+            KMeans(random_state=0, n_init="auto"),
             {"features": [0]},
             "'estimator' must be a fitted regressor or classifier",
         ),
@@ -779,3 +836,19 @@ def test_kind_average_and_average_of_individual(Estimator, data):
     pdp_ind = partial_dependence(est, X=X, features=[1, 2], kind="individual")
     avg_ind = np.mean(pdp_ind["individual"], axis=1)
     assert_allclose(avg_ind, pdp_avg["average"])
+
+
+def test_mixed_type_categorical():
+    """Check that we raise a proper error when a column has mixed types and
+    the sorting of `np.unique` will fail."""
+    X = np.array(["A", "B", "C", np.nan], dtype=object).reshape(-1, 1)
+    y = np.array([0, 1, 0, 1])
+
+    from sklearn.preprocessing import OrdinalEncoder
+
+    clf = make_pipeline(
+        OrdinalEncoder(encoded_missing_value=-1),
+        LogisticRegression(),
+    ).fit(X, y)
+    with pytest.raises(ValueError, match="The column #0 contains mixed data types"):
+        partial_dependence(clf, X, features=[0])
